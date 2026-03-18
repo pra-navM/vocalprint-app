@@ -33,7 +33,7 @@ function loadFromLS(key, fallback) {
   catch { return fallback; }
 }
 function saveToLS(key, data) {
-  try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* quota exceeded — ignore */ }
 }
 
 // ============================================================
@@ -303,6 +303,7 @@ function AnimatedSTI({ value, label, color = COLORS.teal }) {
   const [display, setDisplay] = useState(0);
   const rafRef = useRef(null);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- animation driven by rAF
     if (value === null || value === undefined) { setDisplay(0); return; }
     const start = performance.now();
     const dur = 1200;
@@ -400,6 +401,7 @@ export default function VocalPrint() {
   useEffect(() => { saveToLS('vp_sessions', sessions); }, [sessions]);
 
   // Clear recordings when session changes
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on session switch
   useEffect(() => { setRecordings([]); }, [selSessionId]);
 
   // Keep recording count ref in sync for use in closures
@@ -616,6 +618,7 @@ export default function VocalPrint() {
   // Save STI result to session metadata
   useEffect(() => {
     if (!selSessionId || stiValue === null) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync derived STI to session store
     setSessions(prev => prev.map(s => s.id === selSessionId
       ? { ...s, stiResult: stiValue, biasCorrectedSTI: biasCorrectedSTI, n: analyzedRecs.length }
       : s
@@ -821,7 +824,7 @@ export default function VocalPrint() {
                     <XAxis dataKey="name" stroke={COLORS.dimText} fontSize={11} />
                     <YAxis stroke={COLORS.dimText} fontSize={11} />
                     <Tooltip contentStyle={{ background: COLORS.navy, border: `1px solid ${COLORS.border}`, borderRadius: 8, fontFamily: FONTS.mono, fontSize: 12 }}
-                      formatter={(value, name, props) => [value.toFixed(2), name]}
+                      formatter={(value, name) => [value.toFixed(2), name]}
                       labelFormatter={(label, payload) => {
                         if (payload && payload[0]) {
                           const d = payload[0].payload;
