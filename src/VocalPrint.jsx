@@ -4,20 +4,27 @@ import {
   ResponsiveContainer, ReferenceLine, Legend
 } from 'recharts';
 import {
-  ENVELOPE_POINTS, toMono, extractEnvelope, computeNormalizedEnvelope,
+  ENVELOPE_POINTS, toMono, extractEnvelope,
   calculateSTI, biasCorrectSTI,
 } from './dsp.js';
+import * as db from './db.js';
+import { toStored, withMarker } from './recordingModel.js';
 
 // ============================================================
 // CONSTANTS
 // ============================================================
+// Clinical light palette. Token names are kept for compatibility across the
+// file: `teal` is the primary accent (a calm clinical blue), `navy` and
+// `darkPanel` are now light surfaces.
 const COLORS = {
-  bg: '#0B1829', panel: '#ffffff', teal: '#00E5CC', amber: '#F59E0B',
-  navy: '#0F2744', darkPanel: '#132D4A', text: '#E2E8F0', dimText: '#94A3B8',
-  red: '#EF4444', green: '#10B981', border: '#1E3A5F',
+  bg: '#EEF2F7', panel: '#FFFFFF', teal: '#2563EB', amber: '#B45309',
+  navy: '#FFFFFF', darkPanel: '#EDF1F6', text: '#1F2937', dimText: '#6B7280',
+  red: '#DC2626', green: '#15803D', border: '#D8DFE7',
 };
 const FONTS = {
-  mono: "'DM Mono', monospace", sans: "'DM Sans', sans-serif", display: "'Playfair Display', serif",
+  mono: "'SF Mono', 'Cascadia Mono', Consolas, 'Roboto Mono', monospace",
+  sans: "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+  display: "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
 };
 const STI_SAMPLE_POINTS = 50;
 const MIN_RECS = 5;
@@ -37,20 +44,6 @@ function saveToLS(key, data) {
 }
 
 // ============================================================
-// GOOGLE FONTS LOADER
-// ============================================================
-function useFonts() {
-  useEffect(() => {
-    if (document.getElementById('vp-fonts')) return;
-    const link = document.createElement('link');
-    link.id = 'vp-fonts';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Playfair+Display:wght@600;700&display=swap';
-    document.head.appendChild(link);
-  }, []);
-}
-
-// ============================================================
 // GLOBAL STYLES (injected once)
 // ============================================================
 function useGlobalStyles() {
@@ -60,32 +53,25 @@ function useGlobalStyles() {
     style.id = 'vp-global-styles';
     style.textContent = `
       @keyframes vp-spin { to { transform: rotate(360deg); } }
-      @keyframes vp-fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-      @keyframes vp-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
-      .vp-scanline {
-        background-image: repeating-linear-gradient(
-          0deg, transparent, transparent 2px, rgba(0,229,204,0.015) 2px, rgba(0,229,204,0.015) 4px
-        );
-      }
-      .vp-glow { box-shadow: 0 0 12px rgba(0,229,204,0.25); }
+      @keyframes vp-fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
       .vp-btn {
         padding: 8px 16px; border: 1px solid ${COLORS.border}; border-radius: 6px;
-        background: ${COLORS.darkPanel}; color: ${COLORS.text}; cursor: pointer;
-        font-family: ${FONTS.sans}; font-size: 13px; transition: all 0.2s;
+        background: ${COLORS.panel}; color: ${COLORS.text}; cursor: pointer;
+        font-family: ${FONTS.sans}; font-size: 13px; transition: background 0.15s, border-color 0.15s;
       }
-      .vp-btn:hover { border-color: ${COLORS.teal}; background: ${COLORS.navy}; }
+      .vp-btn:hover { border-color: ${COLORS.teal}; background: ${COLORS.darkPanel}; }
       .vp-btn-primary {
-        background: ${COLORS.teal}; color: ${COLORS.bg}; border-color: ${COLORS.teal}; font-weight: 600;
+        background: ${COLORS.teal}; color: #ffffff; border-color: ${COLORS.teal}; font-weight: 600;
       }
-      .vp-btn-primary:hover { background: #00CCB5; }
+      .vp-btn-primary:hover { background: #1D4ED8; border-color: #1D4ED8; }
       .vp-btn-danger { border-color: ${COLORS.red}; color: ${COLORS.red}; }
-      .vp-btn-danger:hover { background: rgba(239,68,68,0.15); }
+      .vp-btn-danger:hover { background: rgba(220,38,38,0.08); }
       .vp-input {
         padding: 8px 12px; border: 1px solid ${COLORS.border}; border-radius: 6px;
-        background: ${COLORS.bg}; color: ${COLORS.text}; font-family: ${FONTS.sans};
+        background: ${COLORS.panel}; color: ${COLORS.text}; font-family: ${FONTS.sans};
         font-size: 13px; width: 100%; box-sizing: border-box;
       }
-      .vp-input:focus { outline: none; border-color: ${COLORS.teal}; box-shadow: 0 0 0 2px rgba(0,229,204,0.15); }
+      .vp-input:focus { outline: none; border-color: ${COLORS.teal}; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
       .vp-label { font-size: 12px; color: ${COLORS.dimText}; margin-bottom: 4px; font-family: ${FONTS.sans}; }
       * { box-sizing: border-box; }
     `;
@@ -110,7 +96,7 @@ function WaveformCanvas({ envelope, sampleRate, onset, offset, onOnsetChange, on
     ctx.clearRect(0, 0, w, h);
 
     // Background
-    ctx.fillStyle = COLORS.bg;
+    ctx.fillStyle = COLORS.panel;
     ctx.fillRect(0, 0, w, h);
 
     // Find max for normalization
@@ -137,14 +123,14 @@ function WaveformCanvas({ envelope, sampleRate, onset, offset, onOnsetChange, on
     ctx.lineTo(w, h);
     ctx.lineTo(0, h);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(0,229,204,0.08)';
+    ctx.fillStyle = 'rgba(37,99,235,0.08)';
     ctx.fill();
 
     // Selected region shading
     if (onset !== null && offset !== null) {
       const x1 = (onset / duration) * w;
       const x2 = (offset / duration) * w;
-      ctx.fillStyle = 'rgba(0,229,204,0.12)';
+      ctx.fillStyle = 'rgba(37,99,235,0.12)';
       ctx.fillRect(x1, 0, x2 - x1, h);
     }
 
@@ -291,7 +277,7 @@ function LiveWaveformCanvas({ analyserRef, isRecording }) {
   return (
     <canvas ref={canvasRef} style={{
       width: '100%', height: 80, display: 'block', borderRadius: 6,
-      border: `1px solid ${COLORS.teal}`, boxShadow: `0 0 12px rgba(0,229,204,0.3)`,
+      border: `1px solid ${COLORS.border}`,
     }} />
   );
 }
@@ -336,7 +322,7 @@ function Modal({ open, onClose, title, children }) {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+      background: 'rgba(15,23,42,0.45)',
     }} onClick={onClose}>
       <div style={{
         background: COLORS.navy, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 24,
@@ -365,7 +351,6 @@ function Spinner({ size = 24, color = COLORS.teal }) {
 // MAIN COMPONENT — VocalPrint E-STI Tracker
 // ============================================================
 export default function VocalPrint() {
-  useFonts();
   useGlobalStyles();
 
   // --- Patient & Session state (persisted to localStorage) ---
@@ -390,22 +375,41 @@ export default function VocalPrint() {
   // --- Audio refs ---
   const audioCtxRef = useRef(null);
   const mediaRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
   const analyserRef = useRef(null);
   const streamRef = useRef(null);
   const fileInputRef = useRef(null);
   const recordingCountRef = useRef(0);
+  const selSessionIdRef = useRef(null);
+  const recordingsRef = useRef([]);
 
   // Persist patients and sessions
   useEffect(() => { saveToLS('vp_patients', patients); }, [patients]);
   useEffect(() => { saveToLS('vp_sessions', sessions); }, [sessions]);
 
-  // Clear recordings when session changes
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on session switch
-  useEffect(() => { setRecordings([]); }, [selSessionId]);
+  // Keep current session id available to recorder closures (which are
+  // useCallback([]) and would otherwise capture a stale value).
+  useEffect(() => { selSessionIdRef.current = selSessionId; }, [selSessionId]);
+
+  // Load this session's recordings from IndexedDB when the session changes.
+  useEffect(() => {
+    setRecordings([]); // clear immediately so stale clips never flash
+    if (!selSessionId) return;
+    let cancelled = false;
+    db.getRecordingsBySession(selSessionId).then(recs => {
+      if (cancelled) return; // a newer session switch happened — drop this load
+      recs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      setRecordings(recs);
+      recordingCountRef.current = recs.length;
+    });
+    return () => { cancelled = true; };
+  }, [selSessionId]);
 
   // Keep recording count ref in sync for use in closures
   useEffect(() => { recordingCountRef.current = recordings.length; }, [recordings.length]);
+
+  // Keep a live snapshot of recordings for handlers that must read the latest
+  // committed state without re-creating their useCallback identity.
+  useEffect(() => { recordingsRef.current = recordings; }, [recordings]);
 
   // --- AudioContext setup (Safari/iOS unlock on user gesture) ---
   const getAudioCtx = useCallback(async () => {
@@ -418,34 +422,42 @@ export default function VocalPrint() {
   }, []);
 
   // --- Process decoded audio into a recording object ---
-  const processAudio = useCallback(async (audioBuffer, name) => {
+  // sessionId is captured at record/upload start so the clip is always saved
+  // to the session it was created in, even if the user switches sessions while
+  // decoding is in flight.
+  const processAudio = useCallback(async (audioBuffer, name, sessionId) => {
     setProcessing(true);
     try {
+      if (!sessionId) return; // no session to attach this recording to
       await new Promise(r => setTimeout(r, 50)); // yield for UI
       const mono = toMono(audioBuffer);
       const sr = audioBuffer.sampleRate;
       const dur = audioBuffer.duration;
       if (dur < 0.5) {
         alert('Recording is too short (< 0.5s). Skipping.');
-        setProcessing(false);
         return;
       }
       const envelope = extractEnvelope(mono, sr);
       const rec = {
-        id: genId(), name, audioBuffer, sampleRate: sr, duration: dur,
+        id: genId(), name, audioBuffer, pcm: mono, sampleRate: sr, duration: dur,
         envelope, onset: null, offset: null, normalizedEnvelope: null,
+        createdAt: Date.now(),
       };
-      setRecordings(prev => [...prev, rec]);
+      db.putRecording(toStored(rec, sessionId));
+      // Reflect in the live list only if that session is still the one on screen.
+      setRecordings(prev => (selSessionIdRef.current === sessionId ? [...prev, rec] : prev));
     } catch (err) {
       console.error('Audio processing error:', err);
-      alert('Failed to process audio: ' + err.message);
+      alert('Failed to process audio: ' + (err?.message || err));
+    } finally {
+      setProcessing(false);
     }
-    setProcessing(false);
   }, []);
 
   // --- Start recording ---
   const startRecording = useCallback(async () => {
     try {
+      const sessionId = selSessionIdRef.current; // capture at record start
       const ctx = await getAudioCtx();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -456,21 +468,26 @@ export default function VocalPrint() {
       analyserRef.current = analyser;
 
       const recorder = new MediaRecorder(stream);
-      chunksRef.current = [];
-      recorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      const chunks = []; // per-recording buffer — not shared, so a new recording can't clobber it
+      recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const arrayBuf = await blob.arrayBuffer();
-        const decoded = await ctx.decodeAudioData(arrayBuf);
-        const idx = recordingCountRef.current + 1;
-        processAudio(decoded, `Recording ${idx}`);
+        try {
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const arrayBuf = await blob.arrayBuffer();
+          const decoded = await ctx.decodeAudioData(arrayBuf);
+          const idx = recordingCountRef.current + 1;
+          await processAudio(decoded, `Recording ${idx}`, sessionId);
+        } catch (err) {
+          console.error('Recording decode error:', err);
+          alert('Failed to process recording: ' + (err?.message || err));
+        }
       };
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsRecording(true);
     } catch (err) {
-      alert('Microphone access denied or unavailable: ' + err.message);
+      alert('Microphone access denied or unavailable: ' + (err?.message || err));
     }
   }, [getAudioCtx, processAudio]);
 
@@ -484,51 +501,48 @@ export default function VocalPrint() {
 
   // --- File upload ---
   const handleFileUpload = useCallback(async (files) => {
+    const sessionId = selSessionIdRef.current; // capture at upload start
     const ctx = await getAudioCtx();
     for (const file of files) {
       try {
         const arrayBuf = await file.arrayBuffer();
         const decoded = await ctx.decodeAudioData(arrayBuf);
-        await processAudio(decoded, file.name);
+        await processAudio(decoded, file.name, sessionId);
       } catch (err) {
-        alert('Failed to decode ' + file.name + ': ' + err.message);
+        alert('Failed to decode ' + file.name + ': ' + (err?.message || err));
       }
     }
   }, [getAudioCtx, processAudio]);
 
   // --- Update onset/offset for a recording ---
-  const updateRecOnset = useCallback((recId, onset) => {
-    setRecordings(prev => prev.map(r => {
-      if (r.id !== recId) return r;
-      const updated = { ...r, onset };
-      if (updated.onset !== null && updated.offset !== null && updated.offset > updated.onset) {
-        updated.normalizedEnvelope = computeNormalizedEnvelope(r.envelope, r.sampleRate, updated.onset, updated.offset);
-      }
-      return updated;
-    }));
+  const updateRecMarker = useCallback((recId, key, value) => {
+    const target = recordingsRef.current.find(r => r.id === recId);
+    if (!target) return;
+    const updated = withMarker(target, key, value);
+    setRecordings(prev => prev.map(r => (r.id === recId ? updated : r)));
+    db.putRecording(toStored(updated, selSessionIdRef.current));
   }, []);
 
-  const updateRecOffset = useCallback((recId, offset) => {
-    setRecordings(prev => prev.map(r => {
-      if (r.id !== recId) return r;
-      const updated = { ...r, offset };
-      if (updated.onset !== null && updated.offset !== null && updated.offset > updated.onset) {
-        updated.normalizedEnvelope = computeNormalizedEnvelope(r.envelope, r.sampleRate, updated.onset, updated.offset);
-      }
-      return updated;
-    }));
-  }, []);
+  const updateRecOnset = useCallback((recId, onset) => updateRecMarker(recId, 'onset', onset), [updateRecMarker]);
+  const updateRecOffset = useCallback((recId, offset) => updateRecMarker(recId, 'offset', offset), [updateRecMarker]);
 
   // --- Delete a recording ---
   const deleteRecording = useCallback((recId) => {
     setRecordings(prev => prev.filter(r => r.id !== recId));
+    db.deleteRecording(recId);
   }, []);
 
   // --- Playback ---
   const playRecording = useCallback(async (rec) => {
     const ctx = await getAudioCtx();
     const source = ctx.createBufferSource();
-    source.buffer = rec.audioBuffer;
+    // Recordings loaded from IndexedDB have no live AudioBuffer — rebuild from PCM.
+    let buf = rec.audioBuffer;
+    if (!buf) {
+      buf = db.pcmToAudioBuffer(ctx, rec.pcm, rec.sampleRate);
+      rec.audioBuffer = buf; // cache so repeated plays don't rebuild
+    }
+    source.buffer = buf;
     source.connect(ctx.destination);
     const startTime = rec.onset !== null ? rec.onset : 0;
     const dur = rec.offset !== null ? rec.offset - startTime : undefined;
@@ -536,7 +550,7 @@ export default function VocalPrint() {
   }, [getAudioCtx]);
 
   // --- STI computation (memoized) ---
-  const analyzedRecs = useMemo(() => recordings.filter(r => r.normalizedEnvelope !== null), [recordings]);
+  const analyzedRecs = useMemo(() => recordings.filter(r => r.normalizedEnvelope != null), [recordings]);
   const stiResult = useMemo(() => {
     if (analyzedRecs.length < 2) return null;
     const envelopes = analyzedRecs.map(r => r.normalizedEnvelope);
@@ -592,10 +606,12 @@ export default function VocalPrint() {
   }, [newPatientName, newPatientPid]);
 
   const deletePatient = useCallback((pid) => {
+    const sids = sessions.filter(s => s.patientId === pid).map(s => s.id);
     setPatients(prev => prev.filter(p => p.id !== pid));
     setSessions(prev => prev.filter(s => s.patientId !== pid));
     if (selPatientId === pid) { setSelPatientId(null); setSelSessionId(null); }
-  }, [selPatientId]);
+    db.deleteRecordingsBySessions(sids);
+  }, [selPatientId, sessions]);
 
   const createSession = useCallback(() => {
     if (!newSessionName.trim() || !newSessionPhrase.trim() || !selPatientId) return;
@@ -613,16 +629,22 @@ export default function VocalPrint() {
   const deleteSession = useCallback((sid) => {
     setSessions(prev => prev.filter(s => s.id !== sid));
     if (selSessionId === sid) setSelSessionId(null);
+    db.deleteRecordingsBySession(sid);
   }, [selSessionId]);
 
-  // Save STI result to session metadata
+  // Save STI result to session metadata. When the STI becomes unavailable
+  // (e.g. recordings deleted below the minimum), clear the stored result so the
+  // sidebar never shows a stale STI for a session that no longer supports one.
   useEffect(() => {
-    if (!selSessionId || stiValue === null) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync derived STI to session store
-    setSessions(prev => prev.map(s => s.id === selSessionId
-      ? { ...s, stiResult: stiValue, biasCorrectedSTI: biasCorrectedSTI, n: analyzedRecs.length }
-      : s
-    ));
+    if (!selSessionId) return;
+    setSessions(prev => prev.map(s => {
+      if (s.id !== selSessionId) return s;
+      if (stiValue === null) {
+        if (s.stiResult === null && s.n === 0) return s; // already cleared
+        return { ...s, stiResult: null, biasCorrectedSTI: null, n: 0 };
+      }
+      return { ...s, stiResult: stiValue, biasCorrectedSTI, n: analyzedRecs.length };
+    }));
   }, [selSessionId, stiValue, biasCorrectedSTI, analyzedRecs.length]);
 
   // --- Export session data ---
@@ -633,20 +655,23 @@ export default function VocalPrint() {
       session: { name: session.name, targetPhrase: session.targetPhrase, date: session.date },
       n: analyzedRecs.length,
       sti: stiValue,
-      biasCorrectedSTI: biasCorrection ? biasCorrectedSTI : undefined,
+      // Always present (null when not applied) so the export schema is stable.
+      biasCorrectedSTI: biasCorrection ? biasCorrectedSTI : null,
       biasCorrection,
-      sdProfile: stiResult?.sdProfile,
+      sdProfile: stiResult?.sdProfile ?? null,
       recordings: analyzedRecs.map(r => ({
         name: r.name, onset: r.onset, offset: r.offset,
         duration: r.offset - r.onset,
-        normalizedEnvelope: Array.from(r.normalizedEnvelope),
+        normalizedEnvelope: r.normalizedEnvelope ? Array.from(r.normalizedEnvelope) : null,
       })),
       durationStats: { mean: durationStats.mean, sd: durationStats.sd },
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `vocalprint_${session.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.json`;
+    // Strip whitespace and characters that are invalid in filenames (Windows/POSIX).
+    const safeName = session.name.replace(/\s+/g, '_').replace(/[\\/:*?"<>|]/g, '-');
+    a.href = url; a.download = `vocalprint_${safeName}_${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(url);
   }, [selSessionId, sessions, analyzedRecs, stiValue, biasCorrectedSTI, biasCorrection, stiResult, durationStats]);
 
@@ -661,14 +686,16 @@ export default function VocalPrint() {
   }, [patientSessions]);
 
   // Chart colors for envelope overlays
-  const envColors = ['#00E5CC', '#38BDF8', '#A78BFA', '#F472B6', '#FBBF24', '#34D399', '#FB923C',
-    '#E879F9', '#6EE7B7', '#F87171', '#818CF8', '#FCD34D', '#2DD4BF', '#C084FC', '#FB7185'];
+  // Categorical palette for overlaid repetitions — saturated enough to
+  // distinguish lines, dark enough to read on a white chart.
+  const envColors = ['#2563EB', '#D55E00', '#059669', '#7C3AED', '#DB2777', '#0891B2', '#CA8A04',
+    '#475569', '#0072B2', '#B91C1C', '#15803D', '#9333EA', '#C2410C', '#0D9488', '#BE185D'];
 
   // ============================================================
   // RENDER
   // ============================================================
   return (
-    <div className="vp-scanline" style={{
+    <div style={{
       display: 'flex', height: '100vh', width: '100vw', background: COLORS.bg,
       fontFamily: FONTS.sans, color: COLORS.text, overflow: 'hidden',
     }}>
@@ -867,7 +894,7 @@ export default function VocalPrint() {
             {/* Recording controls */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16, flexWrap: 'wrap' }}>
               {isRecording ? (
-                <button className="vp-btn" style={{ borderColor: COLORS.red, color: COLORS.red, animation: 'vp-pulse 1s infinite' }}
+                <button className="vp-btn" style={{ borderColor: COLORS.red, color: COLORS.red }}
                   onClick={stopRecording}>■ Stop Recording</button>
               ) : (
                 <button className="vp-btn vp-btn-primary" onClick={startRecording}>● Record</button>
@@ -939,7 +966,7 @@ export default function VocalPrint() {
 
                 {/* Informational message when between 2-4 recordings */}
                 {analyzedRecs.length >= 2 && analyzedRecs.length < MIN_RECS && (
-                  <div style={{ background: 'rgba(56,189,248,0.1)', border: `1px solid #38BDF8`, borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12, color: '#38BDF8' }}>
+                  <div style={{ background: 'rgba(37,99,235,0.08)', border: `1px solid ${COLORS.teal}`, borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12, color: COLORS.teal }}>
                     {analyzedRecs.length < 3
                       ? `${analyzedRecs.length} recordings analyzed — QC table available. Add ${3 - analyzedRecs.length} more for envelope overlay preview, ${MIN_RECS - analyzedRecs.length} more for full STI analysis and export.`
                       : `${analyzedRecs.length} recordings analyzed — overlay preview available. Add ${MIN_RECS - analyzedRecs.length} more for full STI + SD profile analysis and export.`
