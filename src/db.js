@@ -1,5 +1,5 @@
 // ============================================================
-// IndexedDB persistence for VocalPrint recordings
+// IndexedDB persistence for STI Tracker recordings
 //
 // Recordings carry decoded mono PCM (Float32Array) and envelope
 // arrays that are far too large for localStorage. IndexedDB is
@@ -27,7 +27,7 @@ function warnOnce(err) {
   if (warned) return;
   warned = true;
   // Non-fatal: persistence is best-effort.
-  console.warn('VocalPrint: recording persistence unavailable, falling back to in-memory only.', err);
+  console.warn('STI Tracker: recording persistence unavailable, falling back to in-memory only.', err);
 }
 
 /**

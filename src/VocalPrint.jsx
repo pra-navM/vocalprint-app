@@ -348,7 +348,7 @@ function Spinner({ size = 24, color = COLORS.teal }) {
 }
 
 // ============================================================
-// MAIN COMPONENT — VocalPrint E-STI Tracker
+// MAIN COMPONENT — STI Tracker (E-STI analysis)
 // ============================================================
 export default function VocalPrint() {
   useGlobalStyles();
@@ -671,7 +671,7 @@ export default function VocalPrint() {
     const a = document.createElement('a');
     // Strip whitespace and characters that are invalid in filenames (Windows/POSIX).
     const safeName = session.name.replace(/\s+/g, '_').replace(/[\\/:*?"<>|]/g, '-');
-    a.href = url; a.download = `vocalprint_${safeName}_${new Date().toISOString().slice(0, 10)}.json`;
+    a.href = url; a.download = `sti-tracker_${safeName}_${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(url);
   }, [selSessionId, sessions, analyzedRecs, stiValue, biasCorrectedSTI, biasCorrection, stiResult, durationStats]);
 
@@ -716,8 +716,8 @@ export default function VocalPrint() {
           <div style={{ padding: '0 12px 12px', flex: 1, overflowY: 'auto' }}>
             {/* Logo */}
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.teal, fontWeight: 700 }}>VocalPrint</div>
-              <div style={{ fontSize: 10, color: COLORS.dimText, fontFamily: FONTS.mono }}>E-STI Tracker</div>
+              <div style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.teal, fontWeight: 700 }}>STI Tracker</div>
+              <div style={{ fontSize: 10, color: COLORS.dimText, fontFamily: FONTS.mono }}>Envelope-based Spatiotemporal Index</div>
             </div>
             {/* Patients */}
             <div style={{ marginBottom: 16 }}>
@@ -812,9 +812,9 @@ export default function VocalPrint() {
         {/* --- WELCOME / NO SELECTION --- */}
         {!selPatientId && (
           <div style={{ textAlign: 'center', marginTop: 80 }}>
-            <div style={{ fontFamily: FONTS.display, fontSize: 36, color: COLORS.teal, marginBottom: 8 }}>VocalPrint</div>
+            <div style={{ fontFamily: FONTS.display, fontSize: 36, color: COLORS.teal, marginBottom: 8 }}>STI Tracker</div>
             <div style={{ fontFamily: FONTS.mono, fontSize: 14, color: COLORS.dimText, marginBottom: 24 }}>
-              Envelope-based Spatiotemporal Index Tracker
+              Envelope-based Spatiotemporal Index
             </div>
             <div style={{ color: COLORS.dimText, fontSize: 14, marginBottom: 24 }}>
               Create a patient profile to begin tracking speech motor stability.
