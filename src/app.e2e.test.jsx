@@ -12,10 +12,13 @@ import { ENVELOPE_POINTS } from './dsp.js';
 // ---- Stubs for browser APIs happy-dom doesn't implement ----
 
 // A fake decoded AudioBuffer carrying a real signal so the DSP runs for real.
+// The signal is silence → tone burst (0.3–0.7s) → silence, so the import-time
+// auto-detect finds a real onset/offset region (mirrors a real utterance).
 function fakeAudioBuffer(sampleRate = 8000, seconds = 1) {
   const length = sampleRate * seconds;
   const data = new Float32Array(length);
-  for (let i = 0; i < length; i++) data[i] = Math.sin(i / 30) * 0.5;
+  const on = Math.round(0.3 * length), off = Math.round(0.7 * length);
+  for (let i = on; i < off; i++) data[i] = Math.sin(i / 5) * 0.5;
   return {
     numberOfChannels: 1, sampleRate, duration: seconds, length,
     getChannelData: () => data,
@@ -138,16 +141,52 @@ describe('E2E: patient → session → upload → persistence', () => {
     Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
     fireEvent.change(fileInput);
 
-    // The recording row appears and the header count updates
+    // The recording row appears, and import-time auto-detect marks it so the
+    // clip is immediately "analyzed" with no extra clicks (one-step flow).
     await screen.findByText(/utterance1\.wav/);
-    await screen.findByText(/1 recording.*0 analyzed/);
+    await screen.findByText(/1 recording.*1 analyzed/);
 
-    // And it was persisted to IndexedDB under the right session
+    // And it was persisted to IndexedDB under the right session, with markers.
     const sessions = JSON.parse(localStorage.getItem('vp_sessions'));
     const recs = await db.getRecordingsBySession(sessions[0].id);
     expect(recs).toHaveLength(1);
     expect(recs[0].name).toBe('utterance1.wav');
     expect(recs[0].pcm).toBeInstanceOf(Float32Array);
+    expect(recs[0].onset).not.toBeNull();
+    expect(recs[0].offset).toBeGreaterThan(recs[0].onset);
+    expect(recs[0].normalizedEnvelope).toBeInstanceOf(Float32Array);
+  });
+});
+
+describe('E2E: full happy path — upload several clips through to STI + export', () => {
+  it('goes from empty to a computed STI with no manual marking', async () => {
+    render(<App />);
+
+    // Create patient
+    fireEvent.click(await screen.findByText('Create First Patient'));
+    fireEvent.change(screen.getByPlaceholderText('e.g., John Smith'), { target: { value: 'Pat A' } });
+    fireEvent.click(screen.getByText('Create Patient'));
+
+    // Create session
+    fireEvent.click(await screen.findByText('+ New Session'));
+    fireEvent.change(screen.getByPlaceholderText('e.g., Session 1 — baseline'), { target: { value: 'Baseline' } });
+    fireEvent.change(screen.getByPlaceholderText('e.g., Buy Bobby a puppy'), { target: { value: 'Buy Bobby a puppy' } });
+    fireEvent.click(screen.getByText('Create Session'));
+
+    // Upload 5 clips at once via the hidden file input
+    await screen.findByText('● Record');
+    const fileInput = document.querySelector('input[type="file"]');
+    const files = Array.from({ length: 5 }, (_, i) =>
+      new File([new Uint8Array([i + 1])], `rep${i + 1}.wav`, { type: 'audio/wav' }));
+    Object.defineProperty(fileInput, 'files', { value: files, configurable: true });
+    fireEvent.change(fileInput);
+
+    // All 5 auto-mark on import → analyzed, dashboard + export appear at N≥5,
+    // and the STI is written back to the sidebar — no manual marking anywhere.
+    await screen.findByText(/5 recordings.*5 analyzed/);
+    await screen.findByText('Analysis Results');
+    await screen.findByText(/Export Session JSON/);
+    await screen.findByText(/STI: \d+\.\d+ \(N=5\)/);
   });
 });
 

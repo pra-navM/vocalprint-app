@@ -443,11 +443,16 @@ export default function VocalPrint() {
         return;
       }
       const envelope = extractEnvelope(mono, sr);
-      const rec = {
+      let rec = {
         id: genId(), name, audioBuffer, pcm: mono, sampleRate: sr, duration: dur,
         envelope, onset: null, offset: null, normalizedEnvelope: null,
         createdAt: Date.now(),
       };
+      // Pre-mark onset/offset automatically so the clip is immediately ready
+      // for analysis. The clinician can still drag the markers to adjust, and
+      // silent clips (no region found) simply stay unmarked for manual placement.
+      const auto = detectOnsetOffset(envelope, sr);
+      if (auto) rec = withMarkers(rec, auto.onset, auto.offset);
       db.putRecording(toStored(rec, sessionId));
       // Reflect in the live list only if that session is still the one on screen.
       setRecordings(prev => (selSessionIdRef.current === sessionId ? [...prev, rec] : prev));
@@ -1001,7 +1006,9 @@ export default function VocalPrint() {
                   )}
                 </div>
                 <div style={{ fontSize: 10, color: COLORS.dimText, marginTop: 4 }}>
-                  Click waveform to set onset, click again to set offset. Drag markers to adjust.
+                  {rec.onset !== null && rec.offset !== null
+                    ? 'Onset/offset auto-detected — drag a marker to adjust, or use ⌖ Auto-detect to re-run.'
+                    : 'No speech auto-detected — click the waveform to set onset, click again to set offset.'}
                 </div>
               </div>
             ))}

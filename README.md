@@ -2,8 +2,8 @@
 
 A browser-based clinical tool for speech-language professionals to quantify **speech-motor
 stability** using the **Envelope-based Spatiotemporal Index (E-STI)**. Record or upload
-repeated productions of a target utterance, mark (or auto-detect) the onset/offset of each
-repetition, and the app computes the STI and tracks it across sessions for each patient.
+repeated productions of a target utterance — onset/offset are **auto-detected on import**
+(adjust by dragging) — and the app computes the STI and tracks it across sessions per patient.
 
 **Live app:** https://pra-navm.github.io/vocalprint-app/
 
@@ -12,7 +12,7 @@ repetition, and the app computes the STI and tracks it across sessions for each 
 - Patients → sessions → repeated recordings, with a per-session target phrase.
 - Records from the microphone or accepts uploaded audio (`.wav`, `.mp3`, `.webm`, `.ogg`).
 - Extracts the amplitude **envelope** (half-wave rectification + 15 Hz low-pass).
-- **Auto-detect** onset/offset from the envelope (energy-threshold), with manual click/drag override.
+- **Auto-detects** onset/offset from the envelope (energy-threshold) on import, with manual click/drag override.
 - Computes the **E-STI** with optional small-sample bias correction (Wisler et al. 2022),
   an SD profile, an envelope overlay, and a QC table for parse consistency.
 - Tracks STI across sessions and exports a session as JSON.
