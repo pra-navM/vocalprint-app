@@ -26,3 +26,16 @@ export function withMarker(rec, key, value) {
   }
   return updated;
 }
+
+// Apply both onset and offset at once (used by auto-detect), recomputing the
+// normalized envelope in a single step — avoids the transient single-marker
+// state and the extra write that two withMarker() calls would produce.
+export function withMarkers(rec, onset, offset) {
+  const updated = { ...rec, onset, offset };
+  if (onset !== null && offset !== null && offset > onset) {
+    updated.normalizedEnvelope = computeNormalizedEnvelope(rec.envelope, rec.sampleRate, onset, offset);
+  } else {
+    updated.normalizedEnvelope = null;
+  }
+  return updated;
+}

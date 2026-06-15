@@ -3,6 +3,7 @@ import {
   gammaFn, halfWaveRectify, lowPass15Hz, zScoreNormalize,
   resampleLinear, calculateSTI, biasCorrectSTI, extractEnvelope,
   computeNormalizedEnvelope, ENVELOPE_POINTS, STI_POINT_INDICES,
+  detectOnsetOffset,
 } from './dsp.js';
 
 // ============================================================
@@ -348,5 +349,46 @@ describe('full pipeline integration', () => {
     // Same signal repeated 5 times
     const result = calculateSTI([normalized, normalized, normalized, normalized, normalized]);
     expect(result.sti).toBeCloseTo(0, 10);
+  });
+});
+
+describe('detectOnsetOffset', () => {
+  const sr = 8000;
+  // Build a smoothed-envelope-shaped array: silence, burst, silence.
+  function envelopeWithBurst(startSec, endSec, totalSec = 1, level = 1) {
+    const env = new Float32Array(Math.round(totalSec * sr));
+    const a = Math.round(startSec * sr), b = Math.round(endSec * sr);
+    for (let i = a; i < b; i++) env[i] = level;
+    return env;
+  }
+
+  it('finds onset and offset bracketing the burst', () => {
+    const env = envelopeWithBurst(0.3, 0.7);
+    const m = detectOnsetOffset(env, sr);
+    expect(m).not.toBeNull();
+    expect(m.onset).toBeCloseTo(0.3, 2);
+    expect(m.offset).toBeCloseTo(0.7, 2);
+    expect(m.offset).toBeGreaterThan(m.onset);
+  });
+
+  it('returns null for pure silence', () => {
+    expect(detectOnsetOffset(new Float32Array(sr), sr)).toBeNull();
+  });
+
+  it('returns null for a constant (no dynamic range) signal', () => {
+    expect(detectOnsetOffset(new Float32Array(sr).fill(0.5), sr)).toBeNull();
+  });
+
+  it('rejects a 1-sample transient click before the real burst', () => {
+    const env = envelopeWithBurst(0.4, 0.7);
+    env[800] = 1; // a single-sample spike at 0.1s (< minMs sustain)
+    const m = detectOnsetOffset(env, sr);
+    expect(m).not.toBeNull();
+    expect(m.onset).toBeCloseTo(0.4, 2); // not 0.1 — the click is ignored
+  });
+
+  it('returns null on empty input or missing sample rate', () => {
+    expect(detectOnsetOffset(new Float32Array(0), sr)).toBeNull();
+    expect(detectOnsetOffset(envelopeWithBurst(0.3, 0.7), 0)).toBeNull();
   });
 });

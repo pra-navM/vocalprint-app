@@ -99,6 +99,22 @@ function analyzedRecord(sessionId, i) {
   };
 }
 
+// Build an UNMARKED recording whose envelope has a clear burst, so auto-detect
+// can find onset/offset from it.
+function unmarkedRecord(sessionId, i) {
+  const sr = 8000;
+  const envelope = new Float32Array(sr); // 1 second
+  for (let k = Math.round(0.3 * sr); k < Math.round(0.7 * sr); k++) envelope[k] = 1; // burst 0.3–0.7s
+  return {
+    id: `urec-${sessionId}-${i}`, sessionId, name: `Recording ${i + 1}`,
+    sampleRate: sr, duration: 1,
+    pcm: new Float32Array([0.1, -0.1, 0.2]),
+    envelope,
+    onset: null, offset: null, normalizedEnvelope: null,
+    createdAt: 2000 + i,
+  };
+}
+
 describe('E2E: patient → session → upload → persistence', () => {
   it('creates a patient and session, uploads a clip, shows it, and persists it', async () => {
     render(<App />);
@@ -203,5 +219,38 @@ describe('E2E: session isolation', () => {
 
     fireEvent.click(screen.getByText('Session B'));
     await screen.findByText(/1 recording.*1 analyzed/);
+  });
+});
+
+describe('E2E: auto-detect markers', () => {
+  it('detects onset/offset from the envelope and marks the recording analyzed', async () => {
+    const patientId = 'p1';
+    const sessionId = 's1';
+    localStorage.setItem('vp_patients', JSON.stringify([{ id: patientId, name: 'Jane Doe', pid: '' }]));
+    localStorage.setItem('vp_sessions', JSON.stringify([{
+      id: sessionId, patientId, name: 'Baseline', targetPhrase: 'phrase',
+      date: new Date(0).toISOString(), stiResult: null, biasCorrectedSTI: null, n: 0,
+    }]));
+    await db.putRecording(unmarkedRecord(sessionId, 0));
+
+    render(<App />);
+    fireEvent.click(await screen.findByText('Jane Doe'));
+    fireEvent.click(await screen.findByText('Baseline'));
+
+    // Loaded but unmarked → 0 analyzed
+    await screen.findByText(/1 recording.*0 analyzed/);
+
+    // Click the per-recording Auto-detect button
+    fireEvent.click(screen.getByText('⌖ Auto-detect'));
+
+    // Markers placed → recording becomes analyzed, and the burst bounds show
+    await screen.findByText(/1 recording.*1 analyzed/);
+    await screen.findByText(/Onset: 0\.3/);
+    await screen.findByText(/Offset: 0\.69|Offset: 0\.7/);
+
+    // Persisted to IndexedDB with markers
+    const recs = await db.getRecordingsBySession(sessionId);
+    expect(recs[0].onset).toBeCloseTo(0.3, 2);
+    expect(recs[0].normalizedEnvelope).toBeInstanceOf(Float32Array);
   });
 });

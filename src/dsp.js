@@ -130,6 +130,61 @@ export function computeNormalizedEnvelope(envelope, sampleRate, onset, offset) {
   return resampleLinear(zScored);
 }
 
+/** p-th percentile (p in [0,1]) of an array-like of numbers. */
+function percentile(arr, p) {
+  const copy = Array.prototype.slice.call(arr).sort((a, b) => a - b);
+  const idx = Math.min(copy.length - 1, Math.max(0, Math.floor(p * (copy.length - 1))));
+  return copy[idx];
+}
+
+/**
+ * Auto-detect the onset and offset of the spoken utterance from the amplitude
+ * envelope (energy-threshold method). The envelope from extractEnvelope() is
+ * already half-wave rectified and 15 Hz low-pass smoothed, so we threshold it
+ * directly relative to its noise floor and peak:
+ *   - onset:  first run of >= minMs samples above onThreshold
+ *   - offset: last run (reverse scan) of >= minMs samples above offThreshold
+ * The sustain requirement (minMs) rejects transient clicks. Returns
+ * { onset, offset } in seconds, or null if no qualifying region (e.g. silence).
+ */
+export function detectOnsetOffset(envelope, sampleRate, opts = {}) {
+  const n = envelope ? envelope.length : 0;
+  if (!n || !sampleRate) return null;
+  const onFrac = opts.onFrac ?? 0.08;
+  const offFrac = opts.offFrac ?? 0.05;
+  const minMs = opts.minMs ?? 12;
+  const minSamples = Math.max(1, Math.round((minMs / 1000) * sampleRate));
+
+  let peak = 0;
+  for (let i = 0; i < n; i++) if (envelope[i] > peak) peak = envelope[i];
+  if (peak <= 0) return null;
+  const floor = percentile(envelope, 0.1); // robust noise floor (10th percentile)
+  const span = peak - floor;
+  if (span <= 0) return null;
+  const onThreshold = floor + onFrac * span;
+  const offThreshold = floor + offFrac * span;
+
+  // Onset: first sustained run above onThreshold.
+  let onset = -1, run = 0;
+  for (let i = 0; i < n; i++) {
+    if (envelope[i] >= onThreshold) {
+      if (++run >= minSamples) { onset = i - run + 1; break; }
+    } else run = 0;
+  }
+  if (onset < 0) return null;
+
+  // Offset: last sustained run above offThreshold (scan backward).
+  let offset = -1; run = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    if (envelope[i] >= offThreshold) {
+      if (++run >= minSamples) { offset = i + run - 1; break; }
+    } else run = 0;
+  }
+  if (offset <= onset) return null;
+
+  return { onset: onset / sampleRate, offset: offset / sampleRate };
+}
+
 /**
  * Step 5 — STI calculation (Smith et al. 1995; Howell et al. 2009).
  * At each of 50 equally-spaced points (indices 10, 30, 50, ..., 990

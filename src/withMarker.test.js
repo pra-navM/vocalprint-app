@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { withMarker } from './recordingModel.js';
+import { withMarker, withMarkers } from './recordingModel.js';
 import { ENVELOPE_POINTS } from './dsp.js';
 
 // A synthetic 1-second envelope so computeNormalizedEnvelope has real data.
@@ -44,6 +44,29 @@ describe('withMarker', () => {
   it('does not mutate the input recording', () => {
     const rec = makeRec({ onset: 0.2 });
     withMarker(rec, 'offset', 0.8);
+    expect(rec.offset).toBeNull();
+    expect(rec.normalizedEnvelope).toBeNull();
+  });
+});
+
+describe('withMarkers', () => {
+  it('sets both markers and computes the normalized envelope in one step', () => {
+    const result = withMarkers(makeRec(), 0.2, 0.8);
+    expect(result.onset).toBe(0.2);
+    expect(result.offset).toBe(0.8);
+    expect(result.normalizedEnvelope).toBeInstanceOf(Float32Array);
+    expect(result.normalizedEnvelope).toHaveLength(ENVELOPE_POINTS);
+  });
+
+  it('clears the envelope for an invalid range (offset <= onset)', () => {
+    expect(withMarkers(makeRec(), 0.8, 0.2).normalizedEnvelope).toBeNull();
+    expect(withMarkers(makeRec(), 0.5, 0.5).normalizedEnvelope).toBeNull();
+  });
+
+  it('does not mutate the input recording', () => {
+    const rec = makeRec();
+    withMarkers(rec, 0.2, 0.8);
+    expect(rec.onset).toBeNull();
     expect(rec.offset).toBeNull();
     expect(rec.normalizedEnvelope).toBeNull();
   });

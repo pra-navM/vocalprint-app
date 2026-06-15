@@ -5,10 +5,11 @@ import {
 } from 'recharts';
 import {
   ENVELOPE_POINTS, toMono, extractEnvelope,
-  calculateSTI, biasCorrectSTI,
+  calculateSTI, biasCorrectSTI, detectOnsetOffset,
 } from './dsp.js';
 import * as db from './db.js';
-import { toStored, withMarker } from './recordingModel.js';
+import { toStored, withMarker, withMarkers } from './recordingModel.js';
+import { pageview, track } from './analytics.js';
 
 // ============================================================
 // CONSTANTS
@@ -411,6 +412,10 @@ export default function VocalPrint() {
   // committed state without re-creating their useCallback identity.
   useEffect(() => { recordingsRef.current = recordings; }, [recordings]);
 
+  // --- Anonymous, privacy-preserving usage analytics (no PHI; see analytics.js) ---
+  useEffect(() => { pageview(); }, []);
+  const stiTrackedRef = useRef(null);
+
   // --- AudioContext setup (Safari/iOS unlock on user gesture) ---
   const getAudioCtx = useCallback(async () => {
     if (!audioCtxRef.current) {
@@ -525,6 +530,33 @@ export default function VocalPrint() {
 
   const updateRecOnset = useCallback((recId, onset) => updateRecMarker(recId, 'onset', onset), [updateRecMarker]);
   const updateRecOffset = useCallback((recId, offset) => updateRecMarker(recId, 'offset', offset), [updateRecMarker]);
+
+  // --- Set both markers at once (used by auto-detect) ---
+  const setRecMarkers = useCallback((recId, onset, offset) => {
+    const target = recordingsRef.current.find(r => r.id === recId);
+    if (!target) return;
+    const updated = withMarkers(target, onset, offset);
+    setRecordings(prev => prev.map(r => (r.id === recId ? updated : r)));
+    db.putRecording(toStored(updated, selSessionIdRef.current));
+  }, []);
+
+  // Auto-detect onset/offset for one recording from its envelope.
+  const autoDetectMarkers = useCallback((rec) => {
+    const m = detectOnsetOffset(rec.envelope, rec.sampleRate);
+    if (m) setRecMarkers(rec.id, m.onset, m.offset);
+    else alert(`No speech detected in "${rec.name}". Set markers manually by clicking the waveform.`);
+    return !!m;
+  }, [setRecMarkers]);
+
+  // Auto-detect for every recording that has no valid markers yet.
+  const autoDetectAll = useCallback(() => {
+    recordingsRef.current.forEach(rec => {
+      if (rec.normalizedEnvelope == null) {
+        const m = detectOnsetOffset(rec.envelope, rec.sampleRate);
+        if (m) setRecMarkers(rec.id, m.onset, m.offset);
+      }
+    });
+  }, [setRecMarkers]);
 
   // --- Delete a recording ---
   const deleteRecording = useCallback((recId) => {
@@ -647,6 +679,14 @@ export default function VocalPrint() {
     }));
   }, [selSessionId, stiValue, biasCorrectedSTI, analyzedRecs.length]);
 
+  // Count "STI computed" once per session that reaches a valid result (anonymous).
+  useEffect(() => {
+    if (selSessionId && stiValue !== null && stiTrackedRef.current !== selSessionId) {
+      stiTrackedRef.current = selSessionId;
+      track('sti_computed');
+    }
+  }, [selSessionId, stiValue]);
+
   // --- Export session data ---
   const exportSession = useCallback(() => {
     const session = sessions.find(s => s.id === selSessionId);
@@ -673,6 +713,7 @@ export default function VocalPrint() {
     const safeName = session.name.replace(/\s+/g, '_').replace(/[\\/:*?"<>|]/g, '-');
     a.href = url; a.download = `sti-tracker_${safeName}_${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(url);
+    track('session_exported');
   }, [selSessionId, sessions, analyzedRecs, stiValue, biasCorrectedSTI, biasCorrection, stiResult, durationStats]);
 
   // --- Derived data ---
@@ -902,6 +943,10 @@ export default function VocalPrint() {
               <button className="vp-btn" onClick={() => fileInputRef.current?.click()}>↑ Upload Audio</button>
               <input ref={fileInputRef} type="file" accept=".wav,.mp3,.webm,.ogg,audio/*" multiple hidden
                 onChange={e => { if (e.target.files?.length) handleFileUpload(Array.from(e.target.files)); e.target.value = ''; }} />
+              {recordings.some(r => r.normalizedEnvelope == null) && (
+                <button className="vp-btn" onClick={autoDetectAll}
+                  title="Auto-detect onset/offset for all recordings that aren't marked yet">⌖ Auto-detect all</button>
+              )}
               {processing && <><Spinner size={18} /> <span style={{ fontSize: 12, color: COLORS.dimText }}>Processing audio...</span></>}
             </div>
 
@@ -933,6 +978,8 @@ export default function VocalPrint() {
                     {rec.duration < 0.5 && <span style={{ fontSize: 10, color: COLORS.red }}>Too short</span>}
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="vp-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => autoDetectMarkers(rec)}
+                      title="Detect onset/offset automatically from the envelope">⌖ Auto-detect</button>
                     <button className="vp-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={() => playRecording(rec)}>▶ Play</button>
                     <button className="vp-btn" style={{ padding: '3px 8px', fontSize: 11, color: COLORS.red, borderColor: COLORS.red }}
                       onClick={() => deleteRecording(rec.id)}>✕</button>
