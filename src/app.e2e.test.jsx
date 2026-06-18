@@ -107,7 +107,11 @@ function analyzedRecord(sessionId, i) {
 function unmarkedRecord(sessionId, i) {
   const sr = 8000;
   const envelope = new Float32Array(sr); // 1 second
-  for (let k = Math.round(0.3 * sr); k < Math.round(0.7 * sr); k++) envelope[k] = 1; // burst 0.3–0.7s
+  // Burst 0.3–0.7s with a slight intra-burst ramp (0.8→1.0) so the parsed
+  // segment has real variance — a perfectly flat plateau is (correctly)
+  // rejected as zero-variance by computeNormalizedEnvelope.
+  const on = Math.round(0.3 * sr), off = Math.round(0.7 * sr);
+  for (let k = on; k < off; k++) envelope[k] = 0.8 + 0.2 * ((k - on) / (off - on));
   return {
     id: `urec-${sessionId}-${i}`, sessionId, name: `Recording ${i + 1}`,
     sampleRate: sr, duration: 1,

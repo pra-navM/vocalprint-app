@@ -292,6 +292,40 @@ describe('biasCorrectSTI', () => {
 });
 
 // ============================================================
+// computeNormalizedEnvelope — degenerate-segment guards (adversarial review)
+// ============================================================
+describe('computeNormalizedEnvelope degenerate segments', () => {
+  const sr = 8000;
+
+  it('returns null for a constant (zero-variance) segment so it never inflates STI', () => {
+    // A flat plateau (clipping/saturation) z-scores to all zeros; it must be
+    // excluded, not counted as a valid repetition.
+    const env = new Float32Array(sr).fill(0.5);
+    expect(computeNormalizedEnvelope(env, sr, 0.1, 0.9)).toBeNull();
+  });
+
+  it('returns null for a silent (all-zero) segment', () => {
+    const env = new Float32Array(sr); // all zeros
+    expect(computeNormalizedEnvelope(env, sr, 0.1, 0.9)).toBeNull();
+  });
+
+  it('returns null when the marked range is shorter than 2 samples', () => {
+    const env = new Float32Array(sr);
+    for (let i = 0; i < sr; i++) env[i] = Math.abs(Math.sin(i / 30));
+    // 0.0001s @ 8000Hz rounds to a <2-sample span
+    expect(computeNormalizedEnvelope(env, sr, 0.5, 0.5001)).toBeNull();
+  });
+
+  it('still returns a 1000-point envelope for a varying segment', () => {
+    const env = new Float32Array(sr);
+    for (let i = 0; i < sr; i++) env[i] = Math.abs(Math.sin(i / 30)) + 0.01;
+    const out = computeNormalizedEnvelope(env, sr, 0.1, 0.9);
+    expect(out).toBeInstanceOf(Float32Array);
+    expect(out).toHaveLength(ENVELOPE_POINTS);
+  });
+});
+
+// ============================================================
 // Integration: full pipeline with synthetic signals
 // ============================================================
 describe('full pipeline integration', () => {

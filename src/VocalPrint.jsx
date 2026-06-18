@@ -370,6 +370,10 @@ export default function VocalPrint() {
 
   // --- Recording state (ephemeral, in-memory only) ---
   const [recordings, setRecordings] = useState([]); // array of recording objects for current session
+  // Which session the current `recordings` array belongs to. Null during a
+  // session switch until the IndexedDB load resolves. The STI write-back gates
+  // on this so a switch can't persist the prior session's STI onto the new one.
+  const [loadedSessionId, setLoadedSessionId] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [processing, setProcessing] = useState(false);
 
@@ -394,12 +398,14 @@ export default function VocalPrint() {
   // Load this session's recordings from IndexedDB when the session changes.
   useEffect(() => {
     setRecordings([]); // clear immediately so stale clips never flash
+    setLoadedSessionId(null); // recordings no longer match any session until the load resolves
     if (!selSessionId) return;
     let cancelled = false;
     db.getRecordingsBySession(selSessionId).then(recs => {
       if (cancelled) return; // a newer session switch happened — drop this load
       recs.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
       setRecordings(recs);
+      setLoadedSessionId(selSessionId);
       recordingCountRef.current = recs.length;
     });
     return () => { cancelled = true; };
@@ -674,6 +680,9 @@ export default function VocalPrint() {
   // sidebar never shows a stale STI for a session that no longer supports one.
   useEffect(() => {
     if (!selSessionId) return;
+    // Only write back once `recordings` (and thus stiValue) actually belong to
+    // the selected session — otherwise a B→A switch would persist B's STI onto A.
+    if (loadedSessionId !== selSessionId) return;
     setSessions(prev => prev.map(s => {
       if (s.id !== selSessionId) return s;
       if (stiValue === null) {
@@ -682,15 +691,16 @@ export default function VocalPrint() {
       }
       return { ...s, stiResult: stiValue, biasCorrectedSTI, n: analyzedRecs.length };
     }));
-  }, [selSessionId, stiValue, biasCorrectedSTI, analyzedRecs.length]);
+  }, [selSessionId, loadedSessionId, stiValue, biasCorrectedSTI, analyzedRecs.length]);
 
   // Count "STI computed" once per session that reaches a valid result (anonymous).
+  // Gated on loadedSessionId so a transient mid-switch STI can't mis-attribute.
   useEffect(() => {
-    if (selSessionId && stiValue !== null && stiTrackedRef.current !== selSessionId) {
+    if (selSessionId && loadedSessionId === selSessionId && stiValue !== null && stiTrackedRef.current !== selSessionId) {
       stiTrackedRef.current = selSessionId;
       track('sti_computed');
     }
-  }, [selSessionId, stiValue]);
+  }, [selSessionId, loadedSessionId, stiValue]);
 
   // --- Export session data ---
   const exportSession = useCallback(() => {

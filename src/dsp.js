@@ -124,8 +124,19 @@ export function resampleLinear(segment, targetLen = ENVELOPE_POINTS) {
 export function computeNormalizedEnvelope(envelope, sampleRate, onset, offset) {
   const startIdx = Math.round(onset * sampleRate);
   const endIdx = Math.round(offset * sampleRate);
-  if (endIdx <= startIdx) return null;
+  if (endIdx - startIdx < 2) return null; // need ≥2 samples to carry any shape
   const segment = envelope.slice(startIdx, endIdx);
+  // A constant (zero-variance) segment — true silence, a clipped/saturated
+  // plateau, or markers placed on a flat region — z-scores to all zeros. That
+  // carries no temporal shape, yet would still pass the caller's `!= null`
+  // filter and silently inflate the cross-repetition SD (and thus the STI).
+  // Exclude it instead, so it is treated like an unparsed recording.
+  let min = segment[0], max = segment[0];
+  for (let i = 1; i < segment.length; i++) {
+    if (segment[i] < min) min = segment[i];
+    if (segment[i] > max) max = segment[i];
+  }
+  if (max === min) return null;
   const zScored = zScoreNormalize(segment);
   return resampleLinear(zScored);
 }
