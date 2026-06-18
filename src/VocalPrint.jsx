@@ -390,10 +390,12 @@ export default function VocalPrint() {
   const recordingCountRef = useRef(0);
   const selSessionIdRef = useRef(null);
   const recordingsRef = useRef([]);
+  const sessionsRef = useRef(sessions); // latest sessions for record/upload closures
 
   // Persist patients and sessions
   useEffect(() => { saveToLS('vp_patients', patients); }, [patients]);
   useEffect(() => { saveToLS('vp_sessions', sessions); }, [sessions]);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
 
   // Keep current session id available to recorder closures (which are
   // useCallback([]) and would otherwise capture a stale value).
@@ -436,6 +438,16 @@ export default function VocalPrint() {
       }
     });
     return () => { active = false; };
+  }, []);
+
+  // One-time orphan cleanup: reclaim IndexedDB rows whose session no longer
+  // exists (e.g. a session/patient was deleted while a clip was still decoding).
+  // Such recordings are unreachable through the UI anyway — recordings are only
+  // ever accessed via their session — so removing them frees storage without
+  // losing usable data. Runs once with the sessions loaded at startup.
+  useEffect(() => {
+    db.deleteOrphanedRecordings(sessions.map(s => s.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional one-time sweep with the initially loaded sessions
   }, []);
 
   // Flag a failed write so a change is never lost without the user knowing.
@@ -491,6 +503,10 @@ export default function VocalPrint() {
       // silent clips (no region found) simply stay unmarked for manual placement.
       const auto = detectOnsetOffset(envelope, sr);
       if (auto) rec = withMarkers(rec, auto.onset, auto.offset);
+      // If the session (or its patient) was deleted while this clip was
+      // decoding, don't write an orphan row or add it to a list it no longer
+      // belongs to — the recording is simply dropped.
+      if (!sessionsRef.current.some(s => s.id === sessionId)) return;
       // Await the write so we know whether it persisted (and keep the spinner
       // up until it resolves) before reflecting it in the live list.
       const ok = await db.putRecording(toStored(rec, sessionId));

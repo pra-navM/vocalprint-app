@@ -180,6 +180,37 @@ export async function deleteRecordingsBySessions(sessionIds) {
 }
 
 /**
+ * Delete every recording whose sessionId is NOT in `validSessionIds` — i.e.
+ * orphans left when a session/patient was deleted while a clip was still
+ * decoding (the in-flight write lands after the session's cleanup). Iterates
+ * the sessionId index with a key cursor (no PCM loaded), collects orphan
+ * primary keys, then deletes them in the same transaction. Returns the count.
+ */
+export async function deleteOrphanedRecordings(validSessionIds) {
+  const valid = new Set(validSessionIds || []);
+  try {
+    return await tx('readwrite', store => new Promise((resolve, reject) => {
+      const cursorReq = store.index(SESSION_INDEX).openKeyCursor();
+      const toDelete = [];
+      cursorReq.onsuccess = () => {
+        const cursor = cursorReq.result;
+        if (cursor) {
+          if (!valid.has(cursor.key)) toDelete.push(cursor.primaryKey);
+          cursor.continue();
+        } else {
+          toDelete.forEach(key => store.delete(key));
+          resolve(toDelete.length);
+        }
+      };
+      cursorReq.onerror = () => reject(cursorReq.error);
+    }));
+  } catch (err) {
+    warnOnce(err);
+    return 0;
+  }
+}
+
+/**
  * Reconstruct a playable mono AudioBuffer from stored PCM. Used when
  * a recording was loaded from IndexedDB and has no live AudioBuffer.
  */

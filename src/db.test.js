@@ -2,8 +2,8 @@ import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   openDB, putRecording, getRecordingsBySession, deleteRecording,
-  deleteRecordingsBySession, deleteRecordingsBySessions, pcmToAudioBuffer,
-  isPersistenceAvailable, _resetForTests,
+  deleteRecordingsBySession, deleteRecordingsBySessions, deleteOrphanedRecordings,
+  pcmToAudioBuffer, isPersistenceAvailable, _resetForTests,
 } from './db.js';
 
 // Build a representative stored recording.
@@ -139,6 +139,35 @@ describe('deletion', () => {
   it('deleteRecordingsBySessions is a no-op for an empty list', async () => {
     await putRecording(makeRec('a1', 's1'));
     await deleteRecordingsBySessions([]);
+    expect(await getRecordingsBySession('s1')).toHaveLength(1);
+  });
+});
+
+describe('deleteOrphanedRecordings', () => {
+  it('removes recordings whose session is not in the valid set and keeps the rest', async () => {
+    await putRecording(makeRec('a1', 's1'));
+    await putRecording(makeRec('a2', 's1'));
+    await putRecording(makeRec('orphan', 'sGONE')); // session no longer exists
+    await putRecording(makeRec('b1', 's2'));
+
+    const removed = await deleteOrphanedRecordings(['s1', 's2']);
+    expect(removed).toBe(1);
+    expect(await getRecordingsBySession('s1')).toHaveLength(2);
+    expect(await getRecordingsBySession('s2')).toHaveLength(1);
+    expect(await getRecordingsBySession('sGONE')).toEqual([]);
+  });
+
+  it('removes everything when the valid set is empty', async () => {
+    await putRecording(makeRec('a1', 's1'));
+    await putRecording(makeRec('b1', 's2'));
+    expect(await deleteOrphanedRecordings([])).toBe(2);
+    expect(await getRecordingsBySession('s1')).toEqual([]);
+    expect(await getRecordingsBySession('s2')).toEqual([]);
+  });
+
+  it('is a no-op (removes 0) when there are no orphans', async () => {
+    await putRecording(makeRec('a1', 's1'));
+    expect(await deleteOrphanedRecordings(['s1'])).toBe(0);
     expect(await getRecordingsBySession('s1')).toHaveLength(1);
   });
 });

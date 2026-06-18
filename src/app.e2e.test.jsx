@@ -4,7 +4,7 @@
 import 'fake-indexeddb/auto';
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import App from './App.jsx';
 import * as db from './db.js';
 import { ENVELOPE_POINTS } from './dsp.js';
@@ -295,6 +295,37 @@ describe('E2E: auto-detect markers', () => {
     const recs = await db.getRecordingsBySession(sessionId);
     expect(recs[0].onset).toBeCloseTo(0.3, 2);
     expect(recs[0].normalizedEnvelope).toBeInstanceOf(Float32Array);
+  });
+});
+
+describe('E2E: orphaned recordings are swept on load', () => {
+  it('removes IndexedDB recordings whose session no longer exists, keeps valid ones', async () => {
+    localStorage.setItem('vp_patients', JSON.stringify([{ id: 'p1', name: 'Jane Doe', pid: '' }]));
+    localStorage.setItem('vp_sessions', JSON.stringify([{
+      id: 's1', patientId: 'p1', name: 'Baseline', targetPhrase: 'phrase',
+      date: new Date(0).toISOString(), stiResult: null, biasCorrectedSTI: null, n: 0,
+    }]));
+    await db.putRecording(analyzedRecord('s1', 0));        // belongs to a live session
+    await db.putRecording(analyzedRecord('sDeleted', 0));  // orphan — session not in vp_sessions
+
+    render(<App />);
+
+    // Mount sweep removes the orphan; the live session's recording survives.
+    await waitFor(async () => {
+      expect(await db.getRecordingsBySession('sDeleted')).toEqual([]);
+    });
+    expect(await db.getRecordingsBySession('s1')).toHaveLength(1);
+  });
+
+  it('reclaims a recording with no matching session (it is unreachable through the UI)', async () => {
+    // No vp_sessions at all, but a stray recording lingers in IndexedDB. With no
+    // session to surface it, it is dead weight and is reclaimed on load.
+    await db.putRecording(analyzedRecord('s1', 0));
+    render(<App />);
+    await screen.findByText('Create First Patient');
+    await waitFor(async () => {
+      expect(await db.getRecordingsBySession('s1')).toEqual([]);
+    });
   });
 });
 
