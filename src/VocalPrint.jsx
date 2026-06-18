@@ -762,7 +762,7 @@ export default function VocalPrint() {
           <div style={{ padding: '0 12px 12px', flex: 1, overflowY: 'auto' }}>
             {/* Logo */}
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.teal, fontWeight: 700 }}>STI Tracker</div>
+              <div style={{ fontFamily: FONTS.display, fontSize: 22, color: COLORS.teal, fontWeight: 700 }}>E-STI Tracker</div>
               <div style={{ fontSize: 10, color: COLORS.dimText, fontFamily: FONTS.mono }}>Envelope-based Spatiotemporal Index</div>
             </div>
             {/* Patients */}
@@ -858,7 +858,7 @@ export default function VocalPrint() {
         {/* --- WELCOME / NO SELECTION --- */}
         {!selPatientId && (
           <div style={{ textAlign: 'center', marginTop: 80 }}>
-            <div style={{ fontFamily: FONTS.display, fontSize: 36, color: COLORS.teal, marginBottom: 8 }}>STI Tracker</div>
+            <div style={{ fontFamily: FONTS.display, fontSize: 36, color: COLORS.teal, marginBottom: 8 }}>E-STI Tracker</div>
             <div style={{ fontFamily: FONTS.mono, fontSize: 14, color: COLORS.dimText, marginBottom: 24 }}>
               Envelope-based Spatiotemporal Index
             </div>

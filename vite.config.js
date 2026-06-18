@@ -11,8 +11,8 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'favicon.ico', 'apple-touch-icon-180x180.png'],
       manifest: {
-        name: 'STI Tracker',
-        short_name: 'STI Tracker',
+        name: 'E-STI Tracker',
+        short_name: 'E-STI Tracker',
         description: 'Envelope-based Spatiotemporal Index (E-STI) analysis for speech-motor stability. All data stays on your device.',
         theme_color: '#2563EB',
         background_color: '#EEF2F7',
