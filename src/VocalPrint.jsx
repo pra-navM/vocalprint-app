@@ -376,6 +376,10 @@ export default function VocalPrint() {
   const [loadedSessionId, setLoadedSessionId] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [processing, setProcessing] = useState(false);
+  // Surfaced when on-device persistence fails (storage blocked, or a write
+  // failed e.g. quota exceeded) so the clinician knows changes may not survive
+  // a reload, rather than losing data silently.
+  const [persistError, setPersistError] = useState(null);
 
   // --- Audio refs ---
   const audioCtxRef = useRef(null);
@@ -422,6 +426,34 @@ export default function VocalPrint() {
   useEffect(() => { pageview(); }, []);
   const stiTrackedRef = useRef(null);
 
+  // Probe persistence once: if storage is blocked entirely (private mode,
+  // disabled), warn up front that nothing will survive a reload.
+  useEffect(() => {
+    let active = true;
+    db.isPersistenceAvailable().then(ok => {
+      if (active && !ok) {
+        setPersistError('This browser is blocking local storage, so recordings won’t be saved after you reload (e.g. private/incognito mode). You can still record and analyze in this session.');
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  // Flag a failed write so a change is never lost without the user knowing.
+  const notePersistFailure = useCallback(() => {
+    setPersistError('Your most recent change could not be saved to this device — storage may be full or blocked. Already-saved data is safe, but new changes may be lost if you reload.');
+  }, []);
+
+  // Release the microphone / audio resources if the app unmounts mid-session,
+  // so the OS mic indicator doesn't stay on and the AudioContext isn't leaked.
+  useEffect(() => () => {
+    try {
+      const rec = mediaRecorderRef.current;
+      if (rec && rec.state !== 'inactive') rec.stop();
+    } catch { /* ignore */ }
+    try { streamRef.current?.getTracks?.().forEach(t => t.stop()); } catch { /* ignore */ }
+    try { audioCtxRef.current?.close?.(); } catch { /* ignore */ }
+  }, []);
+
   // --- AudioContext setup (Safari/iOS unlock on user gesture) ---
   const getAudioCtx = useCallback(async () => {
     if (!audioCtxRef.current) {
@@ -459,7 +491,10 @@ export default function VocalPrint() {
       // silent clips (no region found) simply stay unmarked for manual placement.
       const auto = detectOnsetOffset(envelope, sr);
       if (auto) rec = withMarkers(rec, auto.onset, auto.offset);
-      db.putRecording(toStored(rec, sessionId));
+      // Await the write so we know whether it persisted (and keep the spinner
+      // up until it resolves) before reflecting it in the live list.
+      const ok = await db.putRecording(toStored(rec, sessionId));
+      if (!ok) notePersistFailure();
       // Reflect in the live list only if that session is still the one on screen.
       setRecordings(prev => (selSessionIdRef.current === sessionId ? [...prev, rec] : prev));
     } catch (err) {
@@ -468,7 +503,7 @@ export default function VocalPrint() {
     } finally {
       setProcessing(false);
     }
-  }, []);
+  }, [notePersistFailure]);
 
   // --- Start recording ---
   const startRecording = useCallback(async () => {
@@ -536,8 +571,8 @@ export default function VocalPrint() {
     if (!target) return;
     const updated = withMarker(target, key, value);
     setRecordings(prev => prev.map(r => (r.id === recId ? updated : r)));
-    db.putRecording(toStored(updated, selSessionIdRef.current));
-  }, []);
+    db.putRecording(toStored(updated, selSessionIdRef.current)).then(ok => { if (!ok) notePersistFailure(); });
+  }, [notePersistFailure]);
 
   const updateRecOnset = useCallback((recId, onset) => updateRecMarker(recId, 'onset', onset), [updateRecMarker]);
   const updateRecOffset = useCallback((recId, offset) => updateRecMarker(recId, 'offset', offset), [updateRecMarker]);
@@ -548,8 +583,8 @@ export default function VocalPrint() {
     if (!target) return;
     const updated = withMarkers(target, onset, offset);
     setRecordings(prev => prev.map(r => (r.id === recId ? updated : r)));
-    db.putRecording(toStored(updated, selSessionIdRef.current));
-  }, []);
+    db.putRecording(toStored(updated, selSessionIdRef.current)).then(ok => { if (!ok) notePersistFailure(); });
+  }, [notePersistFailure]);
 
   // Auto-detect onset/offset for one recording from its envelope.
   const autoDetectMarkers = useCallback((rec) => {
@@ -572,8 +607,8 @@ export default function VocalPrint() {
   // --- Delete a recording ---
   const deleteRecording = useCallback((recId) => {
     setRecordings(prev => prev.filter(r => r.id !== recId));
-    db.deleteRecording(recId);
-  }, []);
+    db.deleteRecording(recId).then(ok => { if (!ok) notePersistFailure(); });
+  }, [notePersistFailure]);
 
   // --- Playback ---
   const playRecording = useCallback(async (rec) => {
@@ -832,6 +867,19 @@ export default function VocalPrint() {
 
       {/* ===================== MAIN CONTENT ===================== */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+
+        {/* --- Persistence warning banner --- */}
+        {persistError && (
+          <div role="alert" style={{
+            display: 'flex', alignItems: 'flex-start', gap: 12,
+            background: 'rgba(220,38,38,0.08)', border: `1px solid ${COLORS.red}`,
+            borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: COLORS.red,
+          }}>
+            <span style={{ flex: 1 }}>⚠ {persistError}</span>
+            <button onClick={() => setPersistError(null)} aria-label="Dismiss"
+              style={{ background: 'none', border: 'none', color: COLORS.red, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0 }}>✕</button>
+          </div>
+        )}
 
         {/* --- MODALS --- */}
         <Modal open={showNewPatient} onClose={() => setShowNewPatient(false)} title="New Patient">

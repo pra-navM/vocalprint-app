@@ -86,7 +86,7 @@ beforeEach(async () => {
   stubCanvas();
 });
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 // Build a stored recording with a valid normalized envelope (so it counts as analyzed).
 function analyzedRecord(sessionId, i) {
@@ -295,5 +295,78 @@ describe('E2E: auto-detect markers', () => {
     const recs = await db.getRecordingsBySession(sessionId);
     expect(recs[0].onset).toBeCloseTo(0.3, 2);
     expect(recs[0].normalizedEnvelope).toBeInstanceOf(Float32Array);
+  });
+});
+
+describe('E2E: persistence failure is surfaced (no silent data loss)', () => {
+  it('shows a dismissible warning banner when a recording fails to save', async () => {
+    // Storage probe still passes, but the write fails (e.g. quota exceeded).
+    vi.spyOn(db, 'putRecording').mockResolvedValue(false);
+
+    render(<App />);
+    fireEvent.click(await screen.findByText('Create First Patient'));
+    fireEvent.change(screen.getByPlaceholderText('e.g., John Smith'), { target: { value: 'Pat A' } });
+    fireEvent.click(screen.getByText('Create Patient'));
+    fireEvent.click(await screen.findByText('+ New Session'));
+    fireEvent.change(screen.getByPlaceholderText('e.g., Session 1 — baseline'), { target: { value: 'Baseline' } });
+    fireEvent.change(screen.getByPlaceholderText('e.g., Buy Bobby a puppy'), { target: { value: 'phrase' } });
+    fireEvent.click(screen.getByText('Create Session'));
+
+    await screen.findByText('● Record');
+    const fileInput = document.querySelector('input[type="file"]');
+    const file = new File([new Uint8Array([1, 2, 3, 4])], 'clip.wav', { type: 'audio/wav' });
+    Object.defineProperty(fileInput, 'files', { value: [file], configurable: true });
+    fireEvent.change(fileInput);
+
+    // The failure is surfaced to the clinician, not swallowed...
+    const banner = await screen.findByText(/could not be saved to this device/i);
+    // ...and the clip still shows in-memory so the session isn't blocked.
+    await screen.findByText(/clip\.wav/);
+
+    // Banner is dismissible.
+    fireEvent.click(banner.parentElement.querySelector('button[aria-label="Dismiss"]'));
+    expect(screen.queryByText(/could not be saved to this device/i)).toBeNull();
+  });
+});
+
+describe('E2E: microphone/audio cleanup on unmount', () => {
+  it('stops the mic stream, the recorder, and closes the AudioContext when unmounted', async () => {
+    // Mock mic + recorder so we can start a real recording session.
+    const track = { stop: vi.fn(), kind: 'audio' };
+    const stream = { getTracks: () => [track] };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn(() => Promise.resolve(stream)) }, configurable: true,
+    });
+    const stopSpy = vi.fn();
+    class MockMediaRecorder {
+      constructor(s) { this.stream = s; this.state = 'inactive'; }
+      start() { this.state = 'recording'; }
+      stop() { this.state = 'inactive'; stopSpy(); }
+    }
+    globalThis.MediaRecorder = MockMediaRecorder;
+    globalThis.requestAnimationFrame = () => 0;
+    globalThis.cancelAnimationFrame = () => {};
+    const closeSpy = vi.spyOn(MockAudioContext.prototype, 'close');
+
+    // Seed straight into a session.
+    localStorage.setItem('vp_patients', JSON.stringify([{ id: 'p1', name: 'Jane Doe', pid: '' }]));
+    localStorage.setItem('vp_sessions', JSON.stringify([{
+      id: 's1', patientId: 'p1', name: 'Baseline', targetPhrase: 'phrase',
+      date: new Date(0).toISOString(), stiResult: null, biasCorrectedSTI: null, n: 0,
+    }]));
+
+    const { unmount } = render(<App />);
+    fireEvent.click(await screen.findByText('Jane Doe'));
+    fireEvent.click(await screen.findByText('Baseline'));
+
+    // Start recording → mic stream + recorder become live.
+    fireEvent.click(await screen.findByText('● Record'));
+    await screen.findByText('■ Stop Recording');
+
+    // Unmount mid-recording → resources must be released.
+    unmount();
+    expect(stopSpy).toHaveBeenCalled();      // recorder stopped
+    expect(track.stop).toHaveBeenCalled();   // mic track stopped (indicator off)
+    expect(closeSpy).toHaveBeenCalled();     // AudioContext closed
   });
 });

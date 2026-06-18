@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   openDB, putRecording, getRecordingsBySession, deleteRecording,
   deleteRecordingsBySession, deleteRecordingsBySessions, pcmToAudioBuffer,
-  _resetForTests,
+  isPersistenceAvailable, _resetForTests,
 } from './db.js';
 
 // Build a representative stored recording.
@@ -173,6 +173,17 @@ describe('pcmToAudioBuffer', () => {
   });
 });
 
+describe('write/delete report success or failure', () => {
+  it('putRecording resolves true and deleteRecording resolves true on success', async () => {
+    await expect(putRecording(makeRec('a1', 's1'))).resolves.toBe(true);
+    await expect(deleteRecording('a1')).resolves.toBe(true);
+  });
+
+  it('isPersistenceAvailable is true when IndexedDB works', async () => {
+    await expect(isPersistenceAvailable()).resolves.toBe(true);
+  });
+});
+
 describe('graceful degradation when IndexedDB is unavailable', () => {
   let saved;
   beforeEach(() => {
@@ -181,11 +192,17 @@ describe('graceful degradation when IndexedDB is unavailable', () => {
   });
   afterEach(() => { globalThis.indexedDB = saved; });
 
-  it('reads resolve to [] and writes resolve without throwing', async () => {
-    await expect(putRecording(makeRec('x', 's1'))).resolves.toBeUndefined();
+  it('reads resolve to [] and writes report failure without throwing', async () => {
+    // Writes now signal failure (false) so the UI can surface it; reads still
+    // degrade to [] and the bulk-delete cleanups still resolve without throwing.
+    await expect(putRecording(makeRec('x', 's1'))).resolves.toBe(false);
     await expect(getRecordingsBySession('s1')).resolves.toEqual([]);
-    await expect(deleteRecording('x')).resolves.toBeUndefined();
+    await expect(deleteRecording('x')).resolves.toBe(false);
     await expect(deleteRecordingsBySession('s1')).resolves.toBeUndefined();
     await expect(deleteRecordingsBySessions(['s1'])).resolves.toBeUndefined();
+  });
+
+  it('isPersistenceAvailable is false when IndexedDB is missing', async () => {
+    await expect(isPersistenceAvailable()).resolves.toBe(false);
   });
 });

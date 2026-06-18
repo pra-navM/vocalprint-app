@@ -101,12 +101,32 @@ async function tx(mode, fn) {
   });
 }
 
-/** Upsert a recording. Covers both add and onset/offset updates. */
+/**
+ * Is on-device persistence available at all? Resolves false when IndexedDB is
+ * missing or blocked (private mode, disabled storage). Lets the UI distinguish
+ * "storage unavailable from the start" from "an individual write failed".
+ */
+export async function isPersistenceAvailable() {
+  try {
+    await openDB();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Upsert a recording. Covers both add and onset/offset updates.
+ * Returns true if it was persisted, false if the write failed (e.g. quota
+ * exceeded) — callers surface that so changes are never lost silently.
+ */
 export async function putRecording(record) {
   try {
     await tx('readwrite', store => { store.put(record); });
+    return true;
   } catch (err) {
     warnOnce(err);
+    return false;
   }
 }
 
@@ -120,12 +140,14 @@ export async function getRecordingsBySession(sessionId) {
   }
 }
 
-/** Delete a single recording by id. */
+/** Delete a single recording by id. Returns true on success, false on failure. */
 export async function deleteRecording(id) {
   try {
     await tx('readwrite', store => { store.delete(id); });
+    return true;
   } catch (err) {
     warnOnce(err);
+    return false;
   }
 }
 
